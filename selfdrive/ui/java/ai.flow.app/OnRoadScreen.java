@@ -91,9 +91,12 @@ public class OnRoadScreen extends ScreenAdapter {
     int[] colorBorder;
     float[] colorSettingsBar = {46f/255, 46f/255, 46f/255};
     // comm params
-    boolean modelAlive, controlsAlive;
+    boolean modelAlive, controlsAlive, radarAlive;
     ZMQSubHandler sh;
+
     Definitions.ControlsState.Reader controlState;
+    Definitions.RadarState.Reader radarState;
+
     String modelTopic = "modelV2";
     String cameraTopic = "roadCameraState";
     String cameraBufferTopic = "roadCameraBuffer";
@@ -101,10 +104,11 @@ public class OnRoadScreen extends ScreenAdapter {
     String carStateTopic = "carState";
     String controlsStateTopic = "controlsState";
     String deviceStateTopic = "deviceState";
+    String radarStateTopic = "radarState";
 
     Label velocityLabel, velocityUnitLabel, alertText1, alertText2, maxCruiseSpeedLabel, dateLabel, vesrionLabel;
-    Table velocityTable, maxCruiseTable, alertTable, infoTable, offRoadTable, rootTable, offRoadRootTable;
-    Stack statusLabelTemp, statusLabelCan, statusLabelOnline, maxCruise;
+    Table velocityTable, maxCruiseTable, alertTable, infoTable, offRoadTable, rootTable, offRoadRootTable, devTable;
+    Stack statusLabelTemp, statusLabelCan, statusLabelOnline, maxCruise, relativeDistanceLabel, relativeSpeedLabel;
     ScrollPane notificationScrollPane;
     ImageButton settingsButton;
     ParsedOutputs parsed = new ParsedOutputs();
@@ -168,6 +172,33 @@ public class OnRoadScreen extends ScreenAdapter {
         Label textLabel = new Label(text, appContext.skin, "default-font-bold", "white");
         textLabel.setAlignment(Align.center);
         return new Stack(borderTexture, statusTexture, textLabel);
+    }
+
+    public Stack getDevLabel(String value, String label, String units){
+        Image borderTexture = new Image(new Texture(Gdx.files.absolute(Path.internal("selfdrive/assets/icons/rounded-border.png"))));
+        Image statusTexture = new Image(loadTextureMipMap("selfdrive/assets/icons/status_label.png"));
+
+        Label valueLabel = new Label(value, appContext.skin, "default-font-semibold-30", "white");
+        valueLabel.setAlignment(Align.top);
+
+        Label labelLabel = new Label(label, appContext.skin, "default-font-20", "white");
+        labelLabel.setAlignment(Align.bottom);
+
+        return new Stack(borderTexture, statusTexture, valueLabel, labelLabel );
+    }
+
+    public void updateDevLabel(Stack statusLabel, String text, String label, float[] color){
+        // Set statusTexture color
+        // statusLabel.getChild(1).setColor(color[0], color[1], color[2], 0.8f);
+
+        // Set valueLabel text
+       Label textLabel = (Label)statusLabel.getChild(2);
+       textLabel.setText(text);
+       textLabel.setColor(color[0], color[1], color[2], 1.0f);
+
+        // Set label text
+       Label labelLabel = (Label)statusLabel.getChild(3);
+       labelLabel.setText(label);
     }
 
     public void addNotification(String text){
@@ -251,6 +282,10 @@ public class OnRoadScreen extends ScreenAdapter {
         Utils.setTableColor(infoTable, colorSettingsBar[0], colorSettingsBar[1], colorSettingsBar[2], 1);
 
         rootTable.add(infoTable).expandY();
+
+        devTable = new Table();
+        devTable.setFillParent(true);
+        devTable.align(Align.right);
 
         velocityTable = new Table();
         velocityTable.setFillParent(true);
@@ -359,10 +394,26 @@ public class OnRoadScreen extends ScreenAdapter {
         logoTexture.setColor(1, 1, 1, 0.85f);
         infoTable.add(logoTexture).align(Align.top).size(110).padTop(35).padBottom(40);
 
+        // devTable.debugTable();
+        devTable.moveBy(-25.f, 0);
+
+        devTable.row();
+        relativeDistanceLabel = getDevLabel("", "", "");
+        devTable.add(relativeDistanceLabel).align(Align.top).height(uiHeight/8f).width(settingsBarWidth*0.8f).padTop(60);
+
+        devTable.row();
+        relativeSpeedLabel = getDevLabel("", "", "");
+        devTable.add(relativeSpeedLabel).align(Align.top).height(uiHeight/8f).width(settingsBarWidth*0.8f).padTop(20);
+        
+        // devTable.row();
+        // devTable.add(statusLabelOnline).align(Align.top).height(uiHeight/8f).width(settingsBarWidth*0.8f).padTop(20);
+
+
         stageFill.addActor(texImage);
         stageUI.addActor(velocityTable);
         stageUI.addActor(maxCruiseTable);
         stageUI.addActor(alertTable);
+        stageUI.addActor(devTable);
         stageSettings.addActor(rootTable);
 
         velocityTable.moveBy(settingsBarWidth/2f, 0); // TODO is this really correct ?
@@ -396,7 +447,7 @@ public class OnRoadScreen extends ScreenAdapter {
         animationNight = GifDecoder.loadGIFAnimation(Animation.PlayMode.LOOP, Gdx.files.absolute(Path.internal("selfdrive/assets/gifs/night.gif")).read());
 
         sh = new ZMQSubHandler(true);
-        sh.createSubscribers(Arrays.asList(cameraTopic, cameraBufferTopic, deviceStateTopic, calibrationTopic, carStateTopic, controlsStateTopic, modelTopic));
+        sh.createSubscribers(Arrays.asList(cameraTopic, cameraBufferTopic, deviceStateTopic, calibrationTopic, carStateTopic, controlsStateTopic, modelTopic, radarStateTopic));
     }
 
     public Animation<TextureRegion> getCurrentAnimation(){
@@ -486,6 +537,60 @@ public class OnRoadScreen extends ScreenAdapter {
             canMisses = 0;
         }
         canErrCountPrev = canErrCount;
+    }
+
+    public static class LeadStatusColors{
+        public static final float[] Good = {255/255f, 255/255f, 255/255f};
+        public static final float[] Close = {255/255f, 188/255f, 0/255f};
+        public static final float[] VeryClose = {255/255f, 0/255f, 0/255f};
+    }
+
+    public void updateRadarState() {
+        radarState = sh.recv(radarStateTopic).getRadarState();
+        Definitions.RadarState.LeadData.Reader leadOne = radarState.getLeadOne();
+
+        String speedUnit = isMetric ? "km/h" : "mph";
+
+        // Add Relative Distance to Primary Lead Car
+        // Unit: Meters
+        if (true) {
+            float lead_d_rel = leadOne.getDRel();
+            float[] valueColor = LeadStatusColors.Good;
+
+            // Orange if close, Red if very close
+            if (lead_d_rel < 5) {
+                valueColor = LeadStatusColors.VeryClose;
+            } else if (lead_d_rel < 15) {
+                valueColor = LeadStatusColors.Close;
+            }
+
+            updateDevLabel(relativeDistanceLabel, Integer.toString((int)lead_d_rel), "REL DIST", valueColor);
+        }
+
+        // Add Relative Velocity vs Primary Lead Car
+        // Unit: kph if metric, else mph
+        if (true) {
+            float lead_v_rel = leadOne.getVRel();
+            float[] valueColor = LeadStatusColors.Good;
+            int value = 0;
+
+            // Red if approaching faster than 10mph
+            // Orange if approaching (negative)
+            if (lead_v_rel < -4.4704) {
+                valueColor = LeadStatusColors.VeryClose;
+            } else if (lead_v_rel < 0) {
+                valueColor = LeadStatusColors.Close;
+            }
+
+
+            if (speedUnit == "mph") {
+                value = (int)(lead_v_rel * 2.236936f);
+            } else {
+                value = (int)(lead_v_rel * 3.6f);
+            }
+
+            updateDevLabel(relativeSpeedLabel, Integer.toString(value), "REL SPEED", valueColor);
+        }
     }
 
     public void updateModelOutputs(){
@@ -712,6 +817,11 @@ public class OnRoadScreen extends ScreenAdapter {
 
         if (sh.updated(deviceStateTopic)) {
             updateDeviceState();
+        }
+
+        if (sh.updated(radarStateTopic)) {
+            updateRadarState();
+            radarAlive = true;
         }
     }
 

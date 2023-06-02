@@ -95,6 +95,10 @@ public class FlowUI extends Game {
         loadFont("selfdrive/assets/fonts/Inter-Regular.ttf", "default-font-30", 30, skin);
         loadFont("selfdrive/assets/fonts/Inter-Regular.ttf", "default-font", 36, skin);
         loadFont("selfdrive/assets/fonts/Inter-Regular.ttf", "default-font-64", 64, skin);
+
+        loadFont("selfdrive/assets/fonts/Inter-SemiBold.ttf", "default-font-semibold-30", 30, skin);
+        loadFont("selfdrive/assets/fonts/Inter-SemiBold.ttf", "default-font-semibold-60", 60, skin);
+
         loadFont("selfdrive/assets/fonts/opensans_bold.ttf", "default-font-bold", 20, skin);
         loadFont("selfdrive/assets/fonts/opensans_bold.ttf", "default-font-bold-med", 45, skin);
         loadFont("selfdrive/assets/fonts/opensans_bold.ttf", "default-font-bold-large", 100, skin);
